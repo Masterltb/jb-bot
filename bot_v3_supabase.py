@@ -5,7 +5,7 @@ import requests
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -98,7 +98,7 @@ def save_user_jira_credentials(discord_id: str, discord_name: str, jira_email: s
             "discord_name": discord_name,
             "jira_email": jira_email,
             "jira_api_token": jira_api_token,
-            "linked_at": datetime.utcnow().isoformat()
+            "linked_at": datetime.now(timezone.utc).isoformat()
         }
         
         response = requests.post(url, headers=headers, json=payload, timeout=10)
