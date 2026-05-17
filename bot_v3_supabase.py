@@ -8,7 +8,6 @@ import logging
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
 # Load environment variables
 load_dotenv()
@@ -26,22 +25,17 @@ GROK_API_KEY = os.getenv('GROK_API_KEY')
 JIRA_URL = os.getenv('JIRA_URL', 'https://jbfivem.atlassian.net')
 JIRA_PROJECT_KEY = os.getenv('JIRA_PROJECT_KEY', 'SCRUM')
 
-# Supabase Configuration
+# Supabase Configuration (sử dụng HTTP API thay vì library)
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+SUPABASE_API_URL = f"{SUPABASE_URL}/rest/v1" if SUPABASE_URL else None
 
 # Validate required config
 if not all([DISCORD_TOKEN, GROK_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
     logger.error("❌ Thiếu cấu hình quan trọng. Vui lòng kiểm tra file .env")
     raise ValueError("Missing required environment variables")
 
-# Initialize Supabase client
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    logger.info("✅ Kết nối tới Supabase thành công")
-except Exception as e:
-    logger.error(f"❌ Lỗi kết nối Supabase: {str(e)}")
-    raise
+logger.info("✅ Kết nối tới Supabase thành công (HTTP API)")
 
 # ================= BOT SETUP =================
 intents = discord.Intents.default()
@@ -61,17 +55,25 @@ COLORS = {
     "Info": discord.Color.blue()
 }
 
-# ================= SUPABASE FUNCTIONS =================
+# ================= SUPABASE FUNCTIONS (HTTP API) =================
 def get_user_jira_credentials(discord_id: str) -> Optional[tuple]:
     """
-    Lấy Jira credentials từ Supabase cho user Discord
+    Lấy Jira credentials từ Supabase cho user Discord (sử dụng HTTP API)
     Returns: (jira_email, jira_api_token) hoặc None nếu không tìm thấy
     """
     try:
-        response = supabase.table("linked_users").select("*").eq("discord_id", str(discord_id)).execute()
-        if response.data and len(response.data) > 0:
-            user_data = response.data[0]
-            return user_data["jira_email"], user_data["jira_api_token"]
+        url = f"{SUPABASE_API_URL}/linked_users?discord_id=eq.{discord_id}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and len(data) > 0:
+                user_data = data[0]
+                return user_data["jira_email"], user_data["jira_api_token"]
         return None
     except Exception as e:
         logger.error(f"Lỗi lấy credentials từ Supabase: {str(e)}")
@@ -80,19 +82,33 @@ def get_user_jira_credentials(discord_id: str) -> Optional[tuple]:
 
 def save_user_jira_credentials(discord_id: str, discord_name: str, jira_email: str, jira_api_token: str) -> bool:
     """
-    Lưu Jira credentials vào Supabase (upsert)
+    Lưu Jira credentials vào Supabase (upsert) - sử dụng HTTP API
     Returns: True nếu thành công, False nếu lỗi
     """
     try:
-        supabase.table("linked_users").upsert({
+        url = f"{SUPABASE_API_URL}/linked_users"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates"
+        }
+        
+        payload = {
             "discord_id": str(discord_id),
             "discord_name": discord_name,
             "jira_email": jira_email,
             "jira_api_token": jira_api_token,
             "linked_at": datetime.utcnow().isoformat()
-        }).execute()
-        logger.info(f"✅ Lưu vào Supabase: {jira_email} (Discord: {discord_name})")
-        return True
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"✅ Lưu vào Supabase: {jira_email} (Discord: {discord_name})")
+            return True
+        else:
+            logger.error(f"Supabase save error {response.status_code}: {response.text}")
+            return False
     except Exception as e:
         logger.error(f"Lỗi lưu vào Supabase: {str(e)}")
         return False
@@ -100,13 +116,24 @@ def save_user_jira_credentials(discord_id: str, discord_name: str, jira_email: s
 
 def delete_user_jira_credentials(discord_id: str) -> bool:
     """
-    Xóa Jira credentials khỏi Supabase
+    Xóa Jira credentials khỏi Supabase - sử dụng HTTP API
     Returns: True nếu thành công, False nếu lỗi
     """
     try:
-        supabase.table("linked_users").delete().eq("discord_id", str(discord_id)).execute()
-        logger.info(f"✅ Xóa khỏi Supabase: Discord ID {discord_id}")
-        return True
+        url = f"{SUPABASE_API_URL}/linked_users?discord_id=eq.{discord_id}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.delete(url, headers=headers, timeout=10)
+        
+        if response.status_code in [200, 204]:
+            logger.info(f"✅ Xóa khỏi Supabase: Discord ID {discord_id}")
+            return True
+        else:
+            logger.error(f"Supabase delete error {response.status_code}: {response.text}")
+            return False
     except Exception as e:
         logger.error(f"Lỗi xóa khỏi Supabase: {str(e)}")
         return False
