@@ -268,7 +268,7 @@ def create_jira_issue(summary: str, description: str, issuetype: str, priority: 
 
 def search_jira_issues(jql: str, max_results: int = 10, jira_email: str = None, jira_api_token: str = None) -> Optional[list]:
     """
-    Tìm kiếm issues trên Jira theo JQL
+    Tìm kiếm issues trên Jira theo JQL (sử dụng API v3 search endpoint)
     """
     if jira_email is None or jira_api_token is None:
         jira_email = os.getenv('JIRA_EMAIL')
@@ -277,13 +277,14 @@ def search_jira_issues(jql: str, max_results: int = 10, jira_email: str = None, 
     if not jira_email or not jira_api_token:
         return None
     
+    # Sử dụng endpoint /search thay vì /search/jql (compatible với Jira Cloud)
     url = f"{JIRA_API_URL}/search"
     headers = {"Content-Type": "application/json"}
     auth = (jira_email, jira_api_token)
     
     params = {
         "jql": jql,
-        "maxResults": max_results,
+        "maxResults": min(max_results, 50),  # Jira limit: max 50
         "fields": "key,summary,issuetype,priority,status,assignee,updated"
     }
     
